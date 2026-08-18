@@ -28,6 +28,15 @@ my-engine-demo.exe --pipeline mesh
 - `Debug | x64`，或
 - `Release | x64`
 
+直接按 F5 时，工程默认传入 `--pipeline vertex`，因此启动 Vertex Shader 路径。要在调试器中切换到 Mesh Shader：
+
+```text
+项目属性 → 配置属性 → 调试 → 命令参数
+--pipeline mesh
+```
+
+这个设置会写入本机的 `.vcxproj.user`，不会改变仓库中的默认启动参数。
+
 也可以从 Developer PowerShell 构建：
 
 ```powershell
