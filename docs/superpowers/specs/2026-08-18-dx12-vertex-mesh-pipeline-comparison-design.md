@@ -59,7 +59,8 @@ src/
 shaders/
 ├─ Common.hlsli
 ├─ VertexPipeline.hlsl
-└─ MeshPipeline.hlsl
+├─ MeshPipeline.hlsl
+└─ PixelShader.hlsl
 tests/
 └─ Smoke.Tests.ps1
 run-vertex.cmd
@@ -74,8 +75,9 @@ README.md
 - `PipelineMode`：解析 `--pipeline` 和 `--frames`，生成明确错误信息。
 - `TriangleData`：保存两条管线共用的 Position、Color 和三角形索引。
 - `Common.hlsli`：共享常量结构和 Shader 输入输出定义。
-- `VertexPipeline.hlsl`：`VSMain` 和 Vertex 模式使用的 `PSMain`。
-- `MeshPipeline.hlsl`：`MSMain` 和等价的 Pixel Shader 入口。
+- `VertexPipeline.hlsl`：只提供传统管线的 `VSMain`。
+- `MeshPipeline.hlsl`：只提供 Mesh Shader 管线的 `MSMain`。
+- `PixelShader.hlsl`：提供两条管线共同使用并只编译一次的 `PSMain`，避免“逻辑等价但二进制不同”的额外变量。
 - `Smoke.Tests.ps1`：执行构建产物的参数与有限帧运行验证。
 
 ## 技术栈与构建约束
@@ -86,10 +88,10 @@ README.md
 - Win32、DXGI 1.6、Direct3D 12。
 - DXC 在构建阶段编译 HLSL：
   - Vertex Shader：`vs_6_0`；
-  - Pixel Shader：`ps_6_0`；
+  - 公共 Pixel Shader：`ps_6_0`；
   - Mesh Shader：`ms_6_5`。
 - Shader 编译产物输出到可执行文件旁的 `shaders` 目录，运行时按可执行文件路径加载。
-- Debug 构建启用 D3D12 Debug Layer；Release 构建关闭 Debug Layer。
+- Debug 构建在系统提供 D3D12 Debug Layer 时启用；缺少可选 Graphics Tools 组件时记录警告并继续。Release 构建不启用 Debug Layer。
 
 ## 公共场景
 
@@ -104,7 +106,7 @@ Index：0、1、2
 
 CPU 每帧更新一个小型常量缓冲，提供二维旋转或等价的变换参数。两条管线产生相同的 Clip-Space Position 和插值颜色。
 
-不使用 Depth Buffer。三角形以单个顺时针或逆时针图元渲染，Rasterizer State 与 Front Face 约定保持一致。
+不使用 Depth Buffer。Rasterizer State 使用 `D3D12_CULL_MODE_NONE`，使示例不把 Front Face 约定引入两条几何入口的比较。
 
 ## Vertex Shader 路径
 
@@ -140,7 +142,8 @@ TriangleData
 
 - Thread 0～2 读取并处理三个 Vertex；
 - Thread 0 写入三角形 Primitive Index；
-- Group 通过少量 `groupshared` 数据和一次 Group Barrier 展示稳定协作范围；
+- `SetMeshOutputCounts(3, 1)` 在一致控制流中调用，并支配所有 Mesh Output 写入；
+- Group 通过少量 `groupshared` 数据和一次 Group Barrier 展示稳定协作范围，全部 32 个 Thread 都到达 Barrier；
 - 其余 Thread 保持非活跃工作分支，但仍属于该 Group。
 
 Shared Memory 的使用以教学可见性为目的，不作为这个三顶点工作负载的性能优化结论。
@@ -166,14 +169,38 @@ Buffer SRV → MS Thread Group → Vertex Output + Primitive Index Output
 → Render Target
 ```
 
-两种模式共用等价 Pixel Shader 逻辑，只输出插值后的顶点颜色。示例不通过 Pixel Shader 增加任何管线差异。
+两种模式绑定同一个 `PixelShader.cso`，只输出插值后的顶点颜色。示例不通过 Pixel Shader 增加任何管线差异。
+
+## D3D12 接口边界
+
+传统管线使用常规接口：
+
+- `D3D12_GRAPHICS_PIPELINE_STATE_DESC`；
+- `ID3D12Device::CreateGraphicsPipelineState`；
+- `IASetVertexBuffers`、`IASetIndexBuffer` 和 `DrawIndexedInstanced`。
+
+Mesh Shader 管线使用 Mesh Shader 对应接口：
+
+- `D3D12_PIPELINE_STATE_STREAM_DESC`，包含 `D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS` 和公共 Pixel Shader；
+- `ID3D12Device2::CreatePipelineState`；
+- `ID3D12GraphicsCommandList6::DispatchMesh`。
+
+两种模式使用一份兼容的 Graphics Root Signature：
+
+- Root CBV `b0`：公共旋转常量；
+- Root SRV `t0`：Vertex Buffer 的 GPU Virtual Address，只由 Mesh Shader 使用；
+- Root SRV `t1`：Index Buffer 的 GPU Virtual Address，只由 Mesh Shader 使用；
+- Root Signature 保留 `D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT`，供 Vertex 模式使用。
+
+SRV 使用 Root Descriptor，不创建额外的 CBV/SRV/UAV Descriptor Heap。Mesh Shader 使用 `StructuredBuffer` 读取数据，结构步长由 HLSL 类型定义。
 
 ## D3D12 资源与状态
 
-- 使用 Default Heap 保存 GPU 侧三角形数据。
+- 使用两个 Default Heap Buffer 分别保存 Vertex 与 Index 数据；两种模式复用同一份 GPU 资源，不为 Mesh 模式复制第二份几何数据。
 - 初始化阶段通过 Upload Heap 和 Copy Command 上传数据。
-- Vertex 模式将资源作为 Vertex/Index Buffer 读取。
-- Mesh 模式通过 SRV 显式读取相同几何内容。
+- Vertex Buffer 进入组合只读状态 `D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE`。
+- Index Buffer 进入组合只读状态 `D3D12_RESOURCE_STATE_INDEX_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE`。
+- Vertex 模式通过 VBV/IBV 读取资源；Mesh 模式通过 Root SRV 显式读取相同资源。
 - 常量缓冲按 D3D12 的 256 字节对齐要求分配。
 - 使用双缓冲 SwapChain、RTV Descriptor Heap、每帧 Command Allocator 和 Fence Value。
 - 为保持示例可读性，允许每帧使用简单 Fence 同步，不以最大化 CPU/GPU 并行为目标。
@@ -191,19 +218,21 @@ Buffer SRV → MS Thread Group → Vertex Output + Primitive Index Output
 - 无效或缺失的 `--pipeline` 参数：输出用法并以非零状态退出。
 - 无效 `--frames`：输出参数错误并退出。
 - DXGI、D3D12、Shader 加载或 PSO 创建失败：保留 HRESULT，显示包含阶段信息的错误。
-- Debug 模式依赖 D3D12 Debug Layer 输出资源状态和命令错误。
-- 主线程捕获初始化与帧循环异常，通过控制台和 MessageBox 展示。
+- Debug 构建尝试启用 D3D12 Debug Layer；系统未安装 Graphics Tools 时记录警告并继续运行，不把可选调试组件作为启动前提。
+- 工程使用 Windows Subsystem。主线程捕获初始化与帧循环异常，通过 `OutputDebugString` 和 MessageBox 展示，并返回非零进程退出码。
 
 ## 验证策略
 
 ### 参数测试
 
-`Smoke.Tests.ps1` 验证：
+`Smoke.Tests.ps1` 以有限帧模式验证：
 
-- `--pipeline vertex` 被接受；
-- `--pipeline mesh` 被接受；
+- `--pipeline vertex --frames 1` 被接受并正常退出；
+- `--pipeline mesh --frames 1` 被接受并正常退出；
 - 未知管线名称返回非零退出码；
 - 非法 `--frames` 返回非零退出码。
+
+测试脚本不会以无限帧模式启动应用，避免自动验证挂起。
 
 ### 构建验证
 
