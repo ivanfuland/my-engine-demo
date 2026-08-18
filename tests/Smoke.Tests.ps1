@@ -5,7 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$executablePath = Join-Path $repositoryRoot "x64\$Configuration\my-engine-demo.exe"
+$executablePath = Join-Path $repositoryRoot `
+    "x64\$Configuration\GeometryPipelineDemo\GeometryPipelineDemo.exe"
 $script:failureCount = 0
 
 function Assert-ExitCode {

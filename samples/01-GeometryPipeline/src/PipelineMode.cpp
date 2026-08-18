@@ -70,6 +70,5 @@ AppOptions ParseOptions(const std::vector<std::wstring>& args) {
 }
 
 std::wstring BuildUsageText() {
-    return L"Usage: my-engine-demo.exe --pipeline vertex|mesh [--frames positive-integer]\n";
+    return L"Usage: GeometryPipelineDemo.exe --pipeline vertex|mesh [--frames positive-integer]\n";
 }
-
