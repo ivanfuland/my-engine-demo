@@ -71,12 +71,31 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\D3D12App.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\PipelineMode.cpp" />
+    <ClCompile Include="src\TriangleData.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\D3D12App.h" />
     <ClInclude Include="src\PipelineMode.h" />
+    <ClInclude Include="src\TriangleData.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\Common.hlsli" />
+    <CustomBuild Include="shaders\VertexPipeline.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T vs_6_0 -E VSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\VertexShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\VertexShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\PixelShader.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T ps_6_0 -E PSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\PixelShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\PixelShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+  </ItemGroup>
+  <Target Name="PrepareShaderOutput" BeforeTargets="CustomBuild">
+    <MakeDir Directories="$(OutDir)shaders" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
-
