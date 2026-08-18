@@ -20,6 +20,7 @@
 - 本机 MSBuild 路径为 `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\amd64\MSBuild.exe`。
 - 不引入第三方库，不使用 `d3dx12.h`；D3D12 结构体和 Pipeline State Stream 辅助类型在项目内定义。
 - 不实现材质、Texture、Sampler、光照、Depth Buffer、相机、双 Viewport、Amplification Shader 或 Meshlet 构建。
+- Win32 客户区固定为720×720，不实现运行时 Resize/SwapChain Resize，避免窗口管理掩盖几何入口差异。
 - 两条管线复用同一份 Vertex/Index GPU Buffer 和同一个 `PixelShader.cso`。
 - Mesh 模式不支持时返回明确错误，不回退到 Vertex 模式。
 - 所有自动运行都带 `--frames N`；自动模式不显示模态对话框。
@@ -52,7 +53,13 @@
 ```powershell
 Assert-ExitCode @('--pipeline', 'unknown', '--frames', '1') 2
 Assert-ExitCode @('--pipeline', 'vertex', '--frames', 'bad') 2
+Assert-ExitCode @('--pipeline', 'vertex', '--frames', '0') 2
 Assert-ExitCode @('--frames', '1') 2
+Assert-ExitCode @('--pipeline') 2
+Assert-ExitCode @('--pipeline', 'vertex', '--pipeline', 'mesh', '--frames', '1') 2
+Assert-ExitCode @('--pipeline', 'vertex', '--unknown', 'value', '--frames', '1') 2
+Assert-ExitCode @('--pipeline', 'vertex', '--frames', '3') 3
+Assert-ExitCode @('--pipeline', 'mesh', '--frames', '3') 3
 ```
 
 `Assert-ExitCode` 使用 `Start-Process -Wait -PassThru`，不得依赖标准输出内容。
@@ -91,7 +98,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\Smoke.Tests.ps1 -Configuration 
 - 未知参数、重复参数、缺值均抛出 `std::invalid_argument`；
 - 参数列表不包含 EXE 路径。
 
-`wWinMain` 使用 `CommandLineToArgvW` 转换参数。参数错误写入 `OutputDebugStringW` 并返回 2，不显示 MessageBox。合法参数暂时返回 3，作为后续渲染测试的明确 RED 状态。
+`wWinMain` 使用 `CommandLineToArgvW` 转换参数，明确跳过 `argv[0]`，仅把其后的参数传给 `ParseOptions`；用 `LocalFree` 释放返回数组。参数错误写入 `OutputDebugStringW` 并返回 2，不显示 MessageBox。合法参数暂时返回 3，作为后续渲染测试的明确 RED 状态。
 
 - [ ] **Step 5: 构建 Debug x64**
 
@@ -108,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\Smoke.Tests.ps1 -Configuration 
 powershell -ExecutionPolicy Bypass -File .\tests\Smoke.Tests.ps1 -Configuration Debug
 ```
 
-预期：3个非法参数 case 全部得到退出码 2；测试退出码 0。
+预期：7个非法参数 case 全部得到退出码2；两个合法但尚未实现的管线 case 得到退出码3；测试退出码0。
 
 - [ ] **Step 7: 提交 Task 1**
 
@@ -137,15 +144,18 @@ git commit -m "build: 建立 DX12 示例工程与命令行契约"
 - Produces: `struct TriangleVertex { float position[2]; float color[3]; };`
 - Produces: `const std::array<TriangleVertex, 3>& TriangleVertices();`
 - Produces: `const std::array<uint32_t, 3>& TriangleIndices();`
-- Produces: `class D3D12App` with `Initialize()`, `RenderFrame(float elapsedSeconds)`, `WaitForGpu()`, `HasDebugValidationErrors()`.
+- Produces: `D3D12App(HWND hwnd, uint32_t width, uint32_t height, PipelineMode mode)`。
+- Produces: `void D3D12App::Initialize()`、`void D3D12App::RenderFrame(float elapsedSeconds)`、`void D3D12App::WaitForGpu()`、`bool D3D12App::HasDebugValidationErrors() const` and RAII cleanup.
+- Produces: `std::filesystem::path GetExecutableDirectory()` and shader loading relative to the EXE, not the process working directory.
 - Consumes: `AppOptions` and `PipelineMode` from Task 1.
 - Produces: `VertexShader.cso` and `PixelShader.cso` beside the EXE under `shaders\`.
 
 - [ ] **Step 1: 增加 Vertex 路径失败测试**
 
-在 `Smoke.Tests.ps1` 中加入：
+在 `Smoke.Tests.ps1` 中把 Task 1 的 Vertex 三帧预期从3替换为0，并加入 Spec 要求的一帧参数 case：
 
 ```powershell
+Assert-ExitCode @('--pipeline', 'vertex', '--frames', '1') 0
 Assert-ExitCode @('--pipeline', 'vertex', '--frames', '3') 0
 ```
 
@@ -181,6 +191,7 @@ Vertex C++ stride 固定为20字节，Input Layout 使用：
 
 - `POSITION`: `DXGI_FORMAT_R32G32_FLOAT`, offset 0；
 - `COLOR`: `DXGI_FORMAT_R32G32B32_FLOAT`, offset 8。
+- Index 数据固定为 `uint32_t`，IBV 使用 `DXGI_FORMAT_R32_UINT`。
 
 - [ ] **Step 4: 写 Vertex 与公共 Pixel Shader**
 
@@ -191,19 +202,19 @@ Vertex C++ stride 固定为20字节，Input Layout 使用：
 在 `.vcxproj` 中用 Custom Build Item 调用：
 
 ```text
-$(WindowsSdkVerBinPath)x64\dxc.exe
+$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe
 ```
 
-命令显式加入 `-I "$(ProjectDir)shaders"`，源文件使用 `%(FullPath)`，避免 MSBuild 工作目录变化导致 `Common.hlsli` 无法解析。
+命令显式加入 `-I "$(ProjectDir)shaders"`，源文件使用 `"%(FullPath)"`，避免 MSBuild 工作目录变化导致 `Common.hlsli` 无法解析。
 
 编译命令分别为：
 
 ```text
--T vs_6_0 -E VSMain VertexPipeline.hlsl -Fo $(OutDir)shaders\VertexShader.cso
--T ps_6_0 -E PSMain PixelShader.hlsl   -Fo $(OutDir)shaders\PixelShader.cso
+"$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe" -T vs_6_0 -E VSMain -I "$(ProjectDir)shaders" "%(FullPath)" -Fo "$(OutDir)shaders\VertexShader.cso"
+"$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe" -T ps_6_0 -E PSMain -I "$(ProjectDir)shaders" "%(FullPath)" -Fo "$(OutDir)shaders\PixelShader.cso"
 ```
 
-为两个输出声明 `Outputs`，把 `Common.hlsli` 列为 `AdditionalInputs`。构建前确保 `$(OutDir)shaders` 存在。
+为两个输出声明 `Outputs`，把 `Common.hlsli` 列为 `AdditionalInputs`。增加单一 `PrepareShaderOutput` Target，设置 `BeforeTargets="CustomBuild"` 并用 `MakeDir Directories="$(OutDir)shaders"` 创建输出目录，避免多个 Custom Build Item 各自负责建目录。
 
 - [ ] **Step 6: 实现 D3D12 公共初始化**
 
@@ -211,9 +222,9 @@ $(WindowsSdkVerBinPath)x64\dxc.exe
 
 1. Debug 构建尝试取得 `ID3D12Debug` 并启用 Debug Layer；失败只写警告。
 2. 创建 `IDXGIFactory6`，使用 `EnumAdapterByGpuPreference(...HIGH_PERFORMANCE...)` 选择非软件 Adapter。
-3. 以 `D3D_FEATURE_LEVEL_12_0` 创建 Device，并查询 `ID3D12Device2`。
+3. 以 `D3D_FEATURE_LEVEL_12_0` 创建基础 `ID3D12Device`；Task 2 的 Vertex 模式不查询 Mesh 专用接口。
 4. 创建 Direct Command Queue、双缓冲 SwapChain、RTV Heap 与两个 RTV。
-5. 创建每 Back Buffer 一个 Command Allocator、一个 `ID3D12GraphicsCommandList6`、Fence 和 Event。
+5. 创建两个 `FrameContext`，每个包含一个 Command Allocator 和对应的 Fence Value；全局只创建一个基础 `ID3D12GraphicsCommandList`、一个 Fence 和一个 Event。
 6. 设置单一 Viewport、Scissor Rect 和 Clear Color。
 
 所有 HRESULT 通过项目内 `ThrowIfFailed(HRESULT, const char* stage)` 转为包含阶段信息的异常。
@@ -228,7 +239,7 @@ Root parameter 1: SRV t0
 Root parameter 2: SRV t1
 ```
 
-使用 `D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT`。不要使用 Descriptor Heap。常量缓冲使用 persistently mapped Upload Heap，分配大小按256字节对齐，保存 `cos(angle)` 和 `sin(angle)`。
+三个 Root Parameter 均使用 `D3D12_SHADER_VISIBILITY_ALL`，使同一 Root Signature 可由 Vertex 模式创建，且不要求设备先具备 Mesh Shader 能力；Vertex Shader 不引用 t0/t1。使用 `D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT`。不要使用 Descriptor Heap。常量缓冲使用 persistently mapped Upload Heap，为每个 Back Buffer 分配一个256字节切片，保存 `cos(angle)` 和 `sin(angle)`。重用某个 `FrameContext` 前先等待它记录的 Fence Value，再 Reset 其 Allocator、更新对应常量切片，并把 Root CBV 绑定到 `baseGpuVA + frameIndex * 256`，避免 CPU 覆盖仍在被 GPU 读取的常量。
 
 - [ ] **Step 8: 上传并复用 Vertex/Index Buffer**
 
@@ -267,7 +278,7 @@ Index:  INDEX_BUFFER              | NON_PIXEL_SHADER_RESOURCE
 
 - [ ] **Step 11: 接入 Win32 消息循环与有限帧退出**
 
-`Main.cpp` 创建窗口并运行非阻塞消息循环。每次渲染前更新旋转常量；成功 Present 后递增 frame count。达到 `--frames N` 后等待 GPU 并正常退出。自动模式发生异常时只写 `OutputDebugStringW` 并返回 4。
+`Main.cpp` 创建固定720×720客户区窗口并运行非阻塞消息循环，不实现 Resize。每次渲染前更新当前 Frame Context 的旋转常量；成功 Present 后递增 frame count。达到 `--frames N` 后等待 GPU 并正常退出。自动模式发生异常时只写 `OutputDebugStringW` 并返回 4。Task 2 完成后，Mesh 模式继续明确返回3，不得暂时回退到 Vertex 路径。
 
 - [ ] **Step 12: 构建并运行 Vertex smoke test**
 
@@ -304,14 +315,15 @@ git commit -m "feat: 实现 DX12 Vertex Shader 三角形路径"
 **Interfaces:**
 - Consumes: Root parameters `b0/t0/t1` and shared Vertex/Index buffers from Task 2.
 - Produces: `MeshShader.cso` compiled as `ms_6_5`.
-- Produces: `D3D12App::CreateMeshPipeline()` and `D3D12App::RecordMeshDraw()`.
+- Produces: `void D3D12App::CreateMeshPipeline()` and `void D3D12App::RecordMeshDraw()`.
 - Produces: Mesh capability failure mapped to process exit code 5.
 
 - [ ] **Step 1: 增加 Mesh 路径失败测试**
 
-在 `Smoke.Tests.ps1` 中加入：
+在 `Smoke.Tests.ps1` 中把 Task 1 的 Mesh 三帧预期从3替换为0，并加入 Spec 要求的一帧参数 case：
 
 ```powershell
+Assert-ExitCode @('--pipeline', 'mesh', '--frames', '1') 0
 Assert-ExitCode @('--pipeline', 'mesh', '--frames', '3') 0
 ```
 
@@ -337,7 +349,7 @@ groupshared VertexData sharedVertices[3];
 
 - `[outputtopology("triangle")]`；
 - `[numthreads(32, 1, 1)]`；
-- 一致控制流中调用一次 `SetMeshOutputCounts(3, 1)`；
+- `MSMain` 源码中只出现一处 `SetMeshOutputCounts(3, 1)`，放在所有分支之外并支配全部 Mesh Output 写入；
 - Thread 0～2 将 Vertex SRV 读入 `sharedVertices`；
 - 全部32个 Thread 调用 `GroupMemoryBarrierWithGroupSync()`；
 - Thread 0～2写3个 `RasterVertex`；
@@ -346,7 +358,7 @@ groupshared VertexData sharedVertices[3];
 - [ ] **Step 4: 增加 Mesh Shader DXC 规则**
 
 ```text
--T ms_6_5 -E MSMain MeshPipeline.hlsl -Fo $(OutDir)shaders\MeshShader.cso
+"$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe" -T ms_6_5 -E MSMain -I "$(ProjectDir)shaders" "%(FullPath)" -Fo "$(OutDir)shaders\MeshShader.cso"
 ```
 
 把 `Common.hlsli` 列为 Additional Input，并声明 `MeshShader.cso` 为输出。
@@ -360,7 +372,7 @@ D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7{};
 device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7));
 ```
 
-若 `MeshShaderTier == D3D12_MESH_SHADER_TIER_NOT_SUPPORTED`，抛出可识别的 `MeshShaderUnsupported` 错误；`Main.cpp` 捕获后返回5。不要创建 Vertex PSO 作为回退。
+若 `MeshShaderTier == D3D12_MESH_SHADER_TIER_NOT_SUPPORTED`，抛出可识别的 `MeshShaderUnsupported` 错误；`Main.cpp` 捕获后返回5。能力检查通过后再从基础 Device 查询 `ID3D12Device2`，并从基础 Command List 查询 `ID3D12GraphicsCommandList6`；任一查询失败也归入 Mesh 初始化错误，不影响 Vertex 模式。不要创建 Vertex PSO 作为回退。
 
 - [ ] **Step 6: 定义本地 Pipeline State Stream 类型**
 
@@ -442,16 +454,16 @@ README 保持在本示例边界内，包含：
 - 为什么不加入材质和 Texture；
 - Mesh Shader 不支持时的错误行为。
 
-- [ ] **Step 3: 人工检查无限帧交互模式**
+- [ ] **Step 3: 执行有界视觉检查**
 
 分别运行：
 
 ```powershell
-.\x64\Debug\my-engine-demo.exe --pipeline vertex
-.\x64\Debug\my-engine-demo.exe --pipeline mesh
+.\x64\Debug\my-engine-demo.exe --pipeline vertex --frames 120
+.\x64\Debug\my-engine-demo.exe --pipeline mesh --frames 120
 ```
 
-每次检查三角形持续旋转、颜色一致、窗口关闭正常。第二个模式可以在关闭第一个后重启，不要求同屏比较。
+每次检查三角形在有限帧期间持续旋转、颜色一致，并由程序自动退出。无限帧交互模式作为 README 中的用户运行方式，不作为自动实施流程中的阻塞步骤。
 
 - [ ] **Step 4: 提交 Task 4**
 
@@ -536,4 +548,4 @@ git log --oneline --decorate -8
 
 - [ ] **Step 7: 在完成声明前执行代码审查与新鲜验证**
 
-按 `superpowers:requesting-code-review` 检查实现是否符合 Spec；修正发现后重新执行 Tasks 5.1～5.4。只有最新一轮构建和测试输出均为0时才能报告完成。
+对照 Spec、Plan 和最终 diff 做本地代码审查；修正发现后重新执行 Tasks 5.1～5.4。只有最新一轮构建和测试输出均为0时才能报告完成。若用户另行要求多智能体审查，再使用相应审查流程。
