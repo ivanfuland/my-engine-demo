@@ -219,7 +219,9 @@ SRV 使用 Root Descriptor，不创建额外的 CBV/SRV/UAV Descriptor Heap。Me
 - 无效 `--frames`：输出参数错误并退出。
 - DXGI、D3D12、Shader 加载或 PSO 创建失败：保留 HRESULT，显示包含阶段信息的错误。
 - Debug 构建尝试启用 D3D12 Debug Layer；系统未安装 Graphics Tools 时记录警告并继续运行，不把可选调试组件作为启动前提。
-- 工程使用 Windows Subsystem。主线程捕获初始化与帧循环异常，通过 `OutputDebugString` 和 MessageBox 展示，并返回非零进程退出码。
+- 工程使用 Windows Subsystem。命令行参数错误通过 `OutputDebugString` 报告，不显示模态对话框。
+- 主线程捕获初始化与帧循环异常：交互式无限帧模式通过 `OutputDebugString` 和 MessageBox 展示；有限帧自动验证模式只写 `OutputDebugString`，避免测试进程被对话框阻塞。
+- Debug Layer 可用时，有限帧模式在退出前检查 `ID3D12InfoQueue`；发现 Error 或 Corruption 级别消息时返回非零退出码。
 
 ## 验证策略
 
