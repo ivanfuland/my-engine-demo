@@ -68,7 +68,13 @@ HWND CreateApplicationWindow(HINSTANCE instance, PipelineMode mode, int showComm
 
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
+int WINAPI wWinMain(
+    _In_ HINSTANCE instance,
+    _In_opt_ HINSTANCE previousInstance,
+    _In_ PWSTR commandLine,
+    _In_ int showCommand) {
+    UNREFERENCED_PARAMETER(previousInstance);
+    UNREFERENCED_PARAMETER(commandLine);
     int argumentCount = 0;
     wchar_t** argumentValues = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
     if (argumentValues == nullptr) {
