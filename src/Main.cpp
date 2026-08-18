@@ -94,10 +94,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         return 2;
     }
 
-    if (options.pipeline == PipelineMode::Mesh) {
-        return 3;
-    }
-
     HWND window = nullptr;
     try {
         window = CreateApplicationWindow(instance, options.pipeline, showCommand);
@@ -139,6 +135,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
             DestroyWindow(window);
         }
         return 0;
+    } catch (const MeshShaderUnsupported& error) {
+        std::wstring message = WidenMessage(error.what());
+        message += L"\n";
+        OutputDebugStringW(message.c_str());
+        if (!options.frameLimit.has_value()) {
+            MessageBoxW(window, message.c_str(), L"my-engine-demo error", MB_OK | MB_ICONERROR);
+        }
+        if (window != nullptr && IsWindow(window)) {
+            DestroyWindow(window);
+        }
+        return 5;
     } catch (const std::exception& error) {
         std::wstring message = WidenMessage(error.what());
         message += L"\n";

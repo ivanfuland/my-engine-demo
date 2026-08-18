@@ -131,6 +131,54 @@ D3D12_DEPTH_STENCIL_DESC DisabledDepthStencilDescription() {
     return description;
 }
 
+#pragma warning(push)
+// Pipeline-state stream subobjects must start on pointer-size boundaries.
+// Tail padding is therefore part of the required binary layout.
+#pragma warning(disable : 4324)
+template <D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename Value>
+struct alignas(void*) PipelineSubobject {
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type = Type;
+    Value value{};
+
+    PipelineSubobject() = default;
+    explicit PipelineSubobject(const Value& initialValue) : value(initialValue) {}
+};
+
+using RootSignatureSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, ID3D12RootSignature*>;
+using MeshShaderSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS, D3D12_SHADER_BYTECODE>;
+using PixelShaderSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE>;
+using BlendSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC>;
+using SampleMaskSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT>;
+using RasterizerSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC>;
+using DepthStencilSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC>;
+using PrimitiveTopologySubobject = PipelineSubobject<
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE>;
+using RenderTargetFormatsSubobject = PipelineSubobject<
+    D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY>;
+using SampleDescriptionSubobject =
+    PipelineSubobject<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC>;
+
+struct alignas(void*) MeshPipelineStream {
+    RootSignatureSubobject rootSignature;
+    MeshShaderSubobject meshShader;
+    PixelShaderSubobject pixelShader;
+    BlendSubobject blend;
+    SampleMaskSubobject sampleMask;
+    RasterizerSubobject rasterizer;
+    DepthStencilSubobject depthStencil;
+    PrimitiveTopologySubobject primitiveTopology;
+    RenderTargetFormatsSubobject renderTargetFormats;
+    SampleDescriptionSubobject sampleDescription;
+};
+#pragma warning(pop)
+
 } // namespace
 
 std::filesystem::path GetExecutableDirectory() {
@@ -170,7 +218,12 @@ void D3D12App::Initialize() {
     CreateRootSignature();
     CreateConstantBuffer();
     UploadGeometry();
-    CreateVertexPipeline();
+    if (mode_ == PipelineMode::Vertex) {
+        CreateVertexPipeline();
+    } else {
+        CheckMeshShaderSupport();
+        CreateMeshPipeline();
+    }
 }
 
 void D3D12App::CreateDeviceAndSwapChain() {
@@ -434,6 +487,47 @@ void D3D12App::CreateVertexPipeline() {
                   "CreateGraphicsPipelineState");
 }
 
+void D3D12App::CheckMeshShaderSupport() {
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options{};
+    ThrowIfFailed(device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options, sizeof(options)),
+                  "Check mesh shader support");
+    if (options.MeshShaderTier == D3D12_MESH_SHADER_TIER_NOT_SUPPORTED) {
+        throw MeshShaderUnsupported();
+    }
+    ThrowIfFailed(device_.As(&meshDevice_), "Query ID3D12Device2");
+    ThrowIfFailed(commandList_.As(&meshCommandList_), "Query ID3D12GraphicsCommandList6");
+}
+
+void D3D12App::CreateMeshPipeline() {
+    const std::vector<std::byte> meshShader =
+        ReadBinaryFile(GetExecutableDirectory() / L"shaders" / L"MeshShader.cso");
+    const std::vector<std::byte> pixelShader =
+        ReadBinaryFile(GetExecutableDirectory() / L"shaders" / L"PixelShader.cso");
+
+    D3D12_RT_FORMAT_ARRAY renderTargetFormats{};
+    renderTargetFormats.NumRenderTargets = 1;
+    renderTargetFormats.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    MeshPipelineStream stream{};
+    stream.rootSignature = RootSignatureSubobject(rootSignature_.Get());
+    stream.meshShader = MeshShaderSubobject({meshShader.data(), meshShader.size()});
+    stream.pixelShader = PixelShaderSubobject({pixelShader.data(), pixelShader.size()});
+    stream.blend = BlendSubobject(DefaultBlendDescription());
+    stream.sampleMask = SampleMaskSubobject(UINT_MAX);
+    stream.rasterizer = RasterizerSubobject(DefaultRasterizerDescription());
+    stream.depthStencil = DepthStencilSubobject(DisabledDepthStencilDescription());
+    stream.primitiveTopology =
+        PrimitiveTopologySubobject(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+    stream.renderTargetFormats = RenderTargetFormatsSubobject(renderTargetFormats);
+    stream.sampleDescription = SampleDescriptionSubobject({1, 0});
+
+    D3D12_PIPELINE_STATE_STREAM_DESC streamDescription{};
+    streamDescription.SizeInBytes = sizeof(stream);
+    streamDescription.pPipelineStateSubobjectStream = &stream;
+    ThrowIfFailed(meshDevice_->CreatePipelineState(&streamDescription, IID_PPV_ARGS(&meshPipeline_)),
+                  "Create mesh pipeline state");
+}
+
 void D3D12App::WaitForFrame(FrameContext& frame) {
     if (frame.fenceValue != 0 && fence_->GetCompletedValue() < frame.fenceValue) {
         ThrowIfFailed(fence_->SetEventOnCompletion(frame.fenceValue, fenceEvent_),
@@ -448,7 +542,9 @@ void D3D12App::RenderFrame(float elapsedSeconds) {
     WaitForFrame(frame);
 
     ThrowIfFailed(frame.commandAllocator->Reset(), "Reset command allocator");
-    ThrowIfFailed(commandList_->Reset(frame.commandAllocator.Get(), vertexPipeline_.Get()),
+    ID3D12PipelineState* pipeline =
+        mode_ == PipelineMode::Vertex ? vertexPipeline_.Get() : meshPipeline_.Get();
+    ThrowIfFailed(commandList_->Reset(frame.commandAllocator.Get(), pipeline),
                   "Reset command list");
 
     SceneConstants constants{{std::cos(elapsedSeconds), std::sin(elapsedSeconds)}};
@@ -469,10 +565,14 @@ void D3D12App::RenderFrame(float elapsedSeconds) {
     commandList_->SetGraphicsRootSignature(rootSignature_.Get());
     commandList_->SetGraphicsRootConstantBufferView(
         0, constantBuffer_->GetGPUVirtualAddress() + frameIndex * ConstantBufferSliceSize);
-    commandList_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    commandList_->IASetVertexBuffers(0, 1, &vertexBufferView_);
-    commandList_->IASetIndexBuffer(&indexBufferView_);
-    commandList_->DrawIndexedInstanced(3, 1, 0, 0, 0);
+    if (mode_ == PipelineMode::Vertex) {
+        commandList_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        commandList_->IASetVertexBuffers(0, 1, &vertexBufferView_);
+        commandList_->IASetIndexBuffer(&indexBufferView_);
+        commandList_->DrawIndexedInstanced(3, 1, 0, 0, 0);
+    } else {
+        RecordMeshDraw();
+    }
 
     D3D12_RESOURCE_BARRIER toPresent =
         TransitionBarrier(renderTargets_[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -486,6 +586,12 @@ void D3D12App::RenderFrame(float elapsedSeconds) {
     const std::uint64_t fenceValue = nextFenceValue_++;
     ThrowIfFailed(commandQueue_->Signal(fence_.Get(), fenceValue), "Signal frame fence");
     frame.fenceValue = fenceValue;
+}
+
+void D3D12App::RecordMeshDraw() {
+    meshCommandList_->SetGraphicsRootShaderResourceView(1, vertexBuffer_->GetGPUVirtualAddress());
+    meshCommandList_->SetGraphicsRootShaderResourceView(2, indexBuffer_->GetGPUVirtualAddress());
+    meshCommandList_->DispatchMesh(1, 1, 1);
 }
 
 void D3D12App::WaitForGpu() {
@@ -526,4 +632,3 @@ bool D3D12App::HasDebugValidationErrors() const {
 #endif
     return false;
 }
-

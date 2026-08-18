@@ -43,7 +43,8 @@ Assert-ExitCode @('--pipeline', 'vertex', '--pipeline', 'mesh', '--frames', '1')
 Assert-ExitCode @('--pipeline', 'vertex', '--unknown', 'value', '--frames', '1') 2
 Assert-ExitCode @('--pipeline', 'vertex', '--frames', '1') 0
 Assert-ExitCode @('--pipeline', 'vertex', '--frames', '3') 0
-Assert-ExitCode @('--pipeline', 'mesh', '--frames', '3') 3
+Assert-ExitCode @('--pipeline', 'mesh', '--frames', '1') 0
+Assert-ExitCode @('--pipeline', 'mesh', '--frames', '3') 0
 
 if ($script:failureCount -ne 0) {
     throw "$script:failureCount smoke test case(s) failed."

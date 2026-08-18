@@ -10,6 +10,12 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
+
+class MeshShaderUnsupported : public std::runtime_error {
+public:
+    MeshShaderUnsupported() : std::runtime_error("Mesh Shader is not supported by this adapter") {}
+};
 
 class D3D12App {
 public:
@@ -43,6 +49,9 @@ private:
     void CreateConstantBuffer();
     void UploadGeometry();
     void CreateVertexPipeline();
+    void CheckMeshShaderSupport();
+    void CreateMeshPipeline();
+    void RecordMeshDraw();
     void WaitForFrame(FrameContext& frame);
 
     HWND hwnd_ = nullptr;
@@ -53,6 +62,7 @@ private:
 
     Microsoft::WRL::ComPtr<IDXGIFactory6> factory_;
     Microsoft::WRL::ComPtr<ID3D12Device> device_;
+    Microsoft::WRL::ComPtr<ID3D12Device2> meshDevice_;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue_;
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain_;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap_;
@@ -60,12 +70,14 @@ private:
     std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> renderTargets_;
     std::array<FrameContext, FrameCount> frames_;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList_;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList6> meshCommandList_;
     Microsoft::WRL::ComPtr<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
     std::uint64_t nextFenceValue_ = 1;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> vertexPipeline_;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> meshPipeline_;
     Microsoft::WRL::ComPtr<ID3D12Resource> constantBuffer_;
     std::byte* mappedConstants_ = nullptr;
 
@@ -79,4 +91,3 @@ private:
 };
 
 std::filesystem::path GetExecutableDirectory();
-

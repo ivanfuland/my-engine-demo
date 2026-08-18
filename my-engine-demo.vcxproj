@@ -93,6 +93,11 @@
       <Outputs>$(OutDir)shaders\PixelShader.cso</Outputs>
       <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
+    <CustomBuild Include="shaders\MeshPipeline.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T ms_6_5 -E MSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\MeshShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\MeshShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
   </ItemGroup>
   <Target Name="PrepareShaderOutput" BeforeTargets="CustomBuild">
     <MakeDir Directories="$(OutDir)shaders" />
