@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{6A4677E4-7DCB-4BDF-A3F8-CE421944D634}</ProjectGuid>
+    <RootNamespace>GeometryPipelineDemo</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LocalDebuggerCommandArguments>--pipeline vertex</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LocalDebuggerCommandArguments>--pipeline vertex</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <TargetName>GeometryPipelineDemo</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>user32.lib;shell32.lib;d3d12.lib;dxgi.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>user32.lib;shell32.lib;d3d12.lib;dxgi.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\D3D12App.cpp" />
+    <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\PipelineMode.cpp" />
+    <ClCompile Include="src\TriangleData.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\D3D12App.h" />
+    <ClInclude Include="src\PipelineMode.h" />
+    <ClInclude Include="src\TriangleData.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\Common.hlsli" />
+    <CustomBuild Include="shaders\VertexPipeline.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T vs_6_0 -E VSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\VertexShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\VertexShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\PixelShader.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T ps_6_0 -E PSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\PixelShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\PixelShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\MeshPipeline.hlsl">
+      <Command>&quot;$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxc.exe&quot; -T ms_6_5 -E MSMain -I &quot;$(ProjectDir)shaders&quot; &quot;%(FullPath)&quot; -Fo &quot;$(OutDir)shaders\MeshShader.cso&quot;</Command>
+      <Outputs>$(OutDir)shaders\MeshShader.cso</Outputs>
+      <AdditionalInputs>$(ProjectDir)shaders\Common.hlsli;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+  </ItemGroup>
+  <Target Name="PrepareShaderOutput" BeforeTargets="CustomBuild">
+    <MakeDir Directories="$(OutDir)shaders" />
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
