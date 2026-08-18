@@ -1,10 +1,10 @@
-# DX12 Vertex Shader 与 Mesh Shader 管线对照
+# DX12 Feature Validation Sample Suite
 
-这个示例使用同一个 DX12 可执行程序渲染同一个旋转彩色三角形，只切换几何入口：
+这个仓库用于组织相互隔离的 DirectX 12 功能验证 Sample。当前包含 `01-GeometryPipeline`，使用同一个可执行程序渲染同一个旋转彩色三角形，只切换几何入口：
 
 ```text
-my-engine-demo.exe --pipeline vertex
-my-engine-demo.exe --pipeline mesh
+GeometryPipelineDemo.exe --pipeline vertex
+GeometryPipelineDemo.exe --pipeline mesh
 ```
 
 - Vertex 模式通过 `DrawIndexedInstanced` 进入 Input Assembler 和 Vertex Shader。
@@ -20,6 +20,23 @@ my-engine-demo.exe --pipeline mesh
 - 支持 Direct3D 12 Mesh Shader Tier 1 的 GPU；本项目验收设备为 NVIDIA RTX 4080 SUPER
 
 工程不依赖 CMake、DirectXTK、`d3dx12.h` 或其他第三方库。
+
+## 仓库结构
+
+```text
+my-engine-demo.sln
+Directory.Build.props
+samples/
+└─ 01-GeometryPipeline/
+   ├─ GeometryPipelineDemo.vcxproj
+   ├─ src/
+   └─ shaders/
+tests/
+run-vertex.cmd
+run-mesh.cmd
+```
+
+根 Solution 是 Sample 容器；每个验证主题拥有独立 VCXPROJ、源码、Shader、EXE 和输出目录。后续 Ray Tracing 与 Bindless 分别加入新的 Sample，不继续扩展当前 `D3D12App`。当第二个 Sample 出现真实重复代码时，再把 Device、SwapChain、FrameContext 和上传逻辑提取到 `shared/Dx12Common`。
 
 ## 构建
 
@@ -47,10 +64,10 @@ my-engine-demo.exe --pipeline mesh
 构建同时调用 Windows SDK 中的 DXC，生成：
 
 ```text
-x64\Debug\my-engine-demo.exe
-x64\Debug\shaders\VertexShader.cso
-x64\Debug\shaders\MeshShader.cso
-x64\Debug\shaders\PixelShader.cso
+x64\Debug\GeometryPipelineDemo\GeometryPipelineDemo.exe
+x64\Debug\GeometryPipelineDemo\shaders\VertexShader.cso
+x64\Debug\GeometryPipelineDemo\shaders\MeshShader.cso
+x64\Debug\GeometryPipelineDemo\shaders\PixelShader.cso
 ```
 
 两条管线加载的是同一个 `PixelShader.cso`。
@@ -60,8 +77,8 @@ x64\Debug\shaders\PixelShader.cso
 直接运行：
 
 ```powershell
-.\x64\Debug\my-engine-demo.exe --pipeline vertex
-.\x64\Debug\my-engine-demo.exe --pipeline mesh
+.\x64\Debug\GeometryPipelineDemo\GeometryPipelineDemo.exe --pipeline vertex
+.\x64\Debug\GeometryPipelineDemo\GeometryPipelineDemo.exe --pipeline mesh
 ```
 
 也可以双击：
@@ -74,8 +91,8 @@ run-mesh.cmd
 脚本优先使用 Debug 产物，找不到时使用 Release 产物。程序默认持续运行到关闭窗口。自动验证使用有限帧参数：
 
 ```powershell
-.\x64\Debug\my-engine-demo.exe --pipeline vertex --frames 3
-.\x64\Debug\my-engine-demo.exe --pipeline mesh --frames 3
+.\x64\Debug\GeometryPipelineDemo\GeometryPipelineDemo.exe --pipeline vertex --frames 3
+.\x64\Debug\GeometryPipelineDemo\GeometryPipelineDemo.exe --pipeline mesh --frames 3
 
 .\run-vertex.cmd --frames 3
 .\run-mesh.cmd --frames 3
